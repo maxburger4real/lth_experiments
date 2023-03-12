@@ -1,0 +1,9 @@
+test_loss,0,0.731041064453125
+test_accuracy,0,0.8687
+test_examples,0,10000.0
+test_loss,469,0.09085043334960938
+test_accuracy,469,0.9701
+test_examples,469,10000.0
+test_loss,938,0.07979262084960938
+test_accuracy,938,0.9754
+test_examples,938,10000.0
