@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import mpld3
 
-from experiments
 st.set_page_config(layout="wide")
 st.title('Lottery Ticket Inspector')
 

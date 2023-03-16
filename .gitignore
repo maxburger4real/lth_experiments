@@ -1,0 +1,6 @@
+open_lth_data/
+settings.json
+__pycache__/
+.ipynb_checkpoints/
+.vscode/
+open_lth_datasets/
