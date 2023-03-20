@@ -10,6 +10,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 import pandas as pd
 import json
+import pickle
 
 
 cmap_mnist = mpl.cm.get_cmap("coolwarm").reversed()
@@ -22,7 +23,8 @@ class MNIST_LENET_300_100_Experiment:
         self.path = experiment_path
 
         # count the number of directories, levels in the experiment
-        self.num_levels = len(next(os.walk(experiment_path))[1])
+        subdirs = next(os.walk(self.path))[1]
+        self.num_levels = len([x for x in subdirs if x.startswith("level")])
         self.state_dict = None
         self.current_path = None
 
@@ -58,7 +60,78 @@ class MNIST_LENET_300_100_Experiment:
         
         self.hparams = self.get_hparams()
     
+    def unpickle_generator(self):
+        """Returns all figure paths and their names in alphabetical order lazily."""
+
+        path = pathlib.Path(os.path.join(self.path, "pickle"))
+
+        # get paths and names for all the plots
+        paths = [f for f in path.iterdir() if f.is_file()]
+        names = [ex.name.replace(".pickle", "") for ex in paths]
+
+        # create s sorted dict, not pretty but works.
+        d = dict(sorted({name:path for name, path in zip(names, paths)}.items()))
+        
+        # go through all plots, load them and yield lazily
+        for name, path in d.items():
+            yield name, path
+
+    def png_generator(self):
+        """Returns all figure paths and their names in alphabetical order lazily."""
+
+        path = pathlib.Path(os.path.join(self.path, "png"))
+
+        # get paths and names for all the plots
+        paths = [f for f in path.iterdir() if f.is_file()]
+        names = [ex.name.replace(".png", "") for ex in paths]
+
+        # create s sorted dict, not pretty but works.
+        d = dict(sorted({name:path for name, path in zip(names, paths)}.items()))
+        
+        # go through all plots, load them and yield lazily
+        for name, path in d.items():
+            yield name, path
+
+    def pickle(self, fig):
+        """pickle a figure in the experiment folder."""
+        if not fig._suptitle.get_text(): raise
+        # convert figure suptitle to filename
+        figname = "_".join(
+            fig._suptitle.get_text()
+            .replace(".","")
+            .replace(",","")
+            .split(" ")
+            )
+        figname += ".pickle"
+
+        # create pickle folder in the experiment
+        path = os.path.join(self.path, "pickle")
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+
+        # dump the pickle
+        path = os.path.join(path, figname)        
+        with open(path, 'wb') as f: # should be 'wb' rather than 'w'
+            pickle.dump(fig, f) 
+        self.to_png(fig)
+  
+    def to_png(self, fig):
+        if not fig._suptitle.get_text(): raise
+        # convert figure suptitle to filename
+        figname = "_".join(
+            fig._suptitle.get_text()
+            .replace(".","")
+            .replace(",","")
+            .split(" ")
+            )
+        path = os.path.join(self.path, "png")
+        pathlib.Path(path).mkdir(parents=True, exist_ok=True)
+        path = os.path.join(path, figname)
+        fig.savefig(path)
+
     def get_state_dict(self, level, ep=0, it=0):
+        """Obtain the state dict of the experiment
+          given the level and epochs iterations."""
+        
         if level > self.num_levels:
             raise ValueError(f"There are only {self.num_levels} levels")
 
@@ -73,7 +146,9 @@ class MNIST_LENET_300_100_Experiment:
         return self.state_dict
     
     def get_metrics(self, level):
-        """Returns the Metrics of the level. index, loss, accuracy."""
+        """Returns the Metrics of the level. 
+        index, loss, accuracy."""
+
         if level > self.num_levels:
             raise ValueError(f"There are only {self.num_levels} levels")
 
@@ -94,6 +169,9 @@ class MNIST_LENET_300_100_Experiment:
         return dff.index.to_numpy(), dff["test_loss"].to_numpy(), dff["test_accuracy"].to_numpy()
 
     def get_sparsity(self, level):
+        """Get the current sparsity in the level,
+          calculated by sparsity report."""
+
         level_name = f'level_{level}'
         path = os.path.join(self.path, level_name)
         path = os.path.join(path, 'main')
@@ -101,14 +179,6 @@ class MNIST_LENET_300_100_Experiment:
         with open(path, "r") as f:
             d = json.load(f)
         return 1 - d['unpruned'] / d['total'] 
-
-
-    def get_mask(self, level):
-        level_name = f'level_{level}'
-        path = os.path.join(self.path, level_name)
-        path = os.path.join(path, 'main')
-        path = os.path.join(path, f'mask.pth')
-        return torch.load(path)
 
     def map_layer_name(self, layer: int, bias=False):
         """Map a numeric value that indicates layer
@@ -128,7 +198,8 @@ class MNIST_LENET_300_100_Experiment:
             it: int = 0,    # the iteration during the level
             ep: int = 0     # the epoch during level
             ):
-        """Get the weights of a level in a layer at certain point in level."""
+        """Get the weights of a level in a layer 
+        at certain point in level."""
 
         layer_name = self.map_layer_name(layer)
         state_dict = self.get_state_dict(level, ep, it)
@@ -140,7 +211,8 @@ class MNIST_LENET_300_100_Experiment:
             it: int = 0,    # the iteration during the level
             ep: int = 0     # the epoch during level
             ):
-        """Get the weights of a level in a layer at certain point in level."""
+        """Get the weights of a level in 
+        a layer at certain point in level."""
 
         layer_name = self.map_layer_name(layer, bias=True)
         state_dict = self.get_state_dict(level, ep, it)
@@ -150,10 +222,22 @@ class MNIST_LENET_300_100_Experiment:
             level: int, # the pruning level
             layer: int, # the layer of the Network
             ):
+        """ Obtain the mask of the current level. 
+        Note: that the mask used in level 1 is the
+        mask resulting from level 0.
+        """
+       
+        level_name = f'level_{level}'
+        path = os.path.join(self.path, level_name)
+        path = os.path.join(path, 'main')
+        path = os.path.join(path, f'mask.pth')
+        mask = torch.load(path)
+
         layer_name = self.map_layer_name(layer)
-        return self.get_mask(level)[layer_name].cpu() == 1
+        return mask[layer_name].cpu() == 1
 
     def get_hparams(self):
+        """Obtain the hyperparams as a dictionary."""
         path = os.path.join(self.path, f'level_{0}')
         path = os.path.join(path, 'main')
         path = os.path.join(path, f'hparams.log')
@@ -169,6 +253,17 @@ class MNIST_LENET_300_100_Experiment:
 
         return hparams
 
+    def get_script(self):
+        parent = pathlib.Path(self.path).parent
+        scripts = [f for f in os.listdir(parent) if f.endswith('.sh')]
+        if len(scripts) != 1:
+            raise ValueError('should be only one script file in the current directory')
+
+        script = scripts[0]
+
+        with open(script, "r") as f:
+            return f.read()
+        
 class direct_access_cmap():
     """
     A abstraction for a discrete colormap to make it easier to access color.
@@ -300,34 +395,96 @@ def get_outer_shell_2d_matrix(input, pad=1):
 
     return input[mask], input[~mask]
 
+def std_label(level, e):
+    return f"lvl:{level} remain:{1-e.get_sparsity(level):.2f} acc:{e.get_metrics(level)[2][-1]:.2f}"
+
+def get_remain_and_prune_idx(x, m)-> tuple:
+    """Returns the newly pruned weights with the new mask."""
+
+
+    remain = (x * m).nonzero(as_tuple=True)
+    prune = (x * ~m).nonzero(as_tuple=True)
+
+    assert x.nonzero(as_tuple=True)[0].numel() == remain[0].numel() + prune[0].numel(), (x.nonzero().numel(),  remain[0].numel(), prune[0].numel())
+    return remain, prune, x[remain], x[prune]
+
+def get_std_mnist_mean_mnist():
+    try:
+        std_mnist = torch.load('std_mnist.pt')
+        mean_mnist = torch.load('mean_mnist.pt')
+
+    except:
+        train_set = torchvision.datasets.MNIST(
+            train=True,
+            root=os.path.join("open_lth_datasets", 'mnist'),
+            download=True,
+            transform=torchvision.transforms.Compose(
+                [
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize(mean=[0.1307], std=[0.3081])
+                ]
+            )
+        )
+
+        trainloader = torch.utils.data.DataLoader(
+            train_set,
+            batch_size=60000,
+            shuffle=False,
+            num_workers=2
+        )
+
+        # get the first batch, aka all images.
+        mnist = next(iter(trainloader))[0].squeeze()    
+
+        # calculate mean and stddev for each feature. replace 0 with nan.
+        std_mnist, mean_mnist  = torch.std_mean(mnist, axis=0)
+        std_mnist[std_mnist == 0] = torch.nan
+        
+        # save because it is unchanging and takes ~15 seconds to compute.
+        torch.save(std_mnist, 'std_mnist.pt')
+        torch.save(mean_mnist, 'mean_mnist.pt')
+    return std_mnist, mean_mnist
+
+def plotgrid(n_plots=1, n_cols=None, individual_plot_size=(6,6)):
+    if n_cols is None or n_cols > n_plots: n_cols = n_plots
+    n_rows = n_plots // n_cols + (0 if n_plots % n_cols == 0 else 1)
+    x_size, y_size = individual_plot_size
+    fig, ax = plt.subplots( 
+        n_rows, n_cols,
+        figsize=(n_cols*x_size,n_rows*y_size), 
+        constrained_layout=True
+    )
+
+    def ax_generator():
+        for i in range(n_plots):
+            row, col = i // n_cols , i % n_cols 
+            if n_rows == 1:
+                yield ax[col]
+            else:
+                yield ax[row, col]
+
+    
+
+    return fig, ax_generator(), ax
 
 """ 
 - - - - FIGURES - - - - 
 These are functions that receive an Experiment 
 Object as input and output a Figure object.
 """
-def fig_remaining_connections_of_neurons(e: MNIST_LENET_300_100_Experiment):
-  # manage grid
-    plot_levels = e.num_levels
+def fig_remaining_connections_of_neurons(e: MNIST_LENET_300_100_Experiment, n_cols=3):
 
-    n_cols = 4 # number of plots next to each other
-    n_rows = plot_levels // n_cols + (0 if plot_levels % n_cols == 0 else 1)
-    fig, ax = plt.subplots( 
-        n_rows, n_cols,
-        figsize=(n_cols*4,n_rows*4), 
-        constrained_layout=True
-    )
+    fig, ax_generator, axs = plotgrid(e.num_levels, n_cols, (4,4))
 
     # colormap
     cmap = mpl.colormaps.get_cmap("turbo").copy().reversed()
     cmap.set_bad(color="k", alpha=1)
 
     # populate grid with plots
-    for level in range(0, plot_levels):
-        row, col = level // n_cols , level % n_cols
+    for level, ax in enumerate(ax_generator):
         find_dead_neurons(
             e.weights(level, layer=0),
-            ax[row,col],
+            ax,
             title=std_label(level, e),
             cmap=cmap
         )
@@ -346,19 +503,18 @@ def fig_weights_evolution_both_layers(
         constrained_layout=True,
         sharey=True,
         sharex=True)
-    
+
     density = True
-    pf = 1 - float(e.hparams["pruning_fraction"])
 
     morph_distributions(
-        distlist=[ (e.weights(level=i, layer=layer),std_label(i, e)) for i in range(e.num_levels)],
+        distlist=[ (e.weights(level=i, layer=layer),std_label(i, e)) for i in range(e.num_levels-1)],
         ax=ax[0],
         fig=fig,
         title=f"remaining initial weights over all levels {'normalized' if density else 'unnormalized'}",
         density=density
     )
     morph_distributions(
-        distlist=[ (e.weights(level=i, layer=layer, it=e.it, ep=e.ep), std_label(i, e)) for i in range(e.num_levels)],
+        distlist=[ (e.weights(level=i, layer=layer, it=e.it, ep=e.ep), std_label(i, e)) for i in range(e.num_levels-1)],
         ax=ax[1],     
         fig=fig,
         title=f"trained weights over all levels {'normalized' if density else 'unnormalized'}",
@@ -373,56 +529,45 @@ def fig_weights_evolution_both_layers(
 
 def fig_grid_input_features_connections_remaining(
         e: MNIST_LENET_300_100_Experiment,
+        ncols = 3
 ):
-    # manage grid
-    plot_levels = e.num_levels
-
-    n_cols = 4 # number of plots next to each other
-    n_rows = plot_levels // n_cols + (0 if plot_levels % n_cols == 0 else 1)
-    fig, ax = plt.subplots( 
-        n_rows, n_cols,
-        figsize=(n_cols*4,n_rows*4), 
-        constrained_layout=True
-    )
+    fig, ax_generator, axs = plotgrid(e.num_levels, ncols, (4,4))
 
     # colormap
     cmap = mpl.colormaps.get_cmap("turbo").copy().reversed()
     cmap.set_bad(color="k", alpha=1)
 
     # populate grid with plots
-    for level in range(0, plot_levels):
-        row, col = level // n_cols , level % n_cols
+    for level, ax in enumerate(ax_generator):
         im = find_dead_features(
             e.weights(level=level, layer=0),
             (28,28), 
-            ax[row,col],
+            ax,
             title=std_label(level, e),
             cmap=cmap
         )
 
     fig.colorbar(
             im,
-            ax=ax,
-            shrink=1.0
+            ax=axs,
+            shrink=1.0,
+            location="top"
         )
 
     return fig
 
-def fig_histogram_of_padding_input_weights_vs_nonpadding_weights(e, pad=1, density=True, sharey=False):
-    fig, ax = plt.subplots(
-        1, e.num_levels,
-        figsize=(32,10), 
-        constrained_layout=True, 
-        sharey=sharey,               # you can see the differences in amount of weights, but the shape is lost
-        )
+def fig_histogram_of_padding_input_weights_vs_nonpadding_weights(
+        e, pad=1, density=True, sharey=False):
     
-    for i in range(e.num_levels):
+    fig, ax_generator, axs = plotgrid(e.num_levels, 4, (4,4))
+
+    for i, ax in enumerate(ax_generator):
         x = e.weights(level=i, layer=0).reshape(300,28,28)
         shell, core = get_outer_shell_2d_matrix(x, pad=pad)
 
-        for j, (x, name) in enumerate(zip([shell, core], ["shell", "core"])):
+        for x, name in zip([shell, core], ["shell", "core"]):
 
-            plot_weight_distribution(x, ax[i], name, f"level{i}", False, True, density)
+            plot_weight_distribution(x, ax, name, std_label(i,e), False, True, density)
 
     return fig
 
@@ -458,27 +603,15 @@ def fig_morph_distributions_shell_vs_core_over_levels(e, pad=1, sharey=False, de
     )
     return fig
 
-def plotgrid(n_plots=1, n_cols=None, individual_plot_size=(16,16)):
-    if n_cols is None or n_cols > n_plots: n_cols = n_plots
-    n_rows = n_plots // n_cols + (0 if n_plots % n_cols == 0 else 1)
-    x_size, y_size = individual_plot_size
-    fig, ax = plt.subplots( 
-        n_rows, n_cols,
-        figsize=(n_cols*x_size,n_rows*y_size), 
-        constrained_layout=True
-    )
-
-    def ax_generator():
-        for i in range(n_plots):
-            row, col = i // n_cols , i % n_cols 
-            if n_rows == 1:
-                yield ax[col]
-            else:
-                yield ax[row, col]
-
-    return fig, ax_generator(), ax
-
-def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which="", show_pruned=True, show_survived=True, setlim = True, n_cols=None):
+def fig_scatter_of_survivors_in_before_after_weight_space_(
+        e, 
+        cmap="Set3",
+        which=None, 
+        show_pruned=True, 
+        show_survived=True, 
+        n_cols=None,
+        skip_last=True
+        ):
 
     fig, ax_generator, axs = plotgrid(e.num_levels, n_cols=n_cols)
     layer=0
@@ -488,6 +621,10 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
 
     #for level in range(0, e.num_levels-1):
     for level, ax in enumerate(ax_generator):
+
+        if level == e.num_levels-1 and skip_last:
+            continue # skip last level.
+
         X = e.weights(level, layer)
         Y = e.weights(level, layer, ep=e.ep, it=e.it)
         m = e.mask(level+1, layer)
@@ -512,11 +649,17 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
             cp = "black"
             mp = "x"
         elif which == "previous_y":
-            if level==0: continue
-            cr = np.abs(Y_[remain_idx]).flatten()
-            mr = ","
-            cp = "black"
-            mp = "x"
+            if level==0: 
+                xr = X.flatten()
+                yr = Y.flatten()
+                cr = Y.flatten()
+                cp = None
+            else:
+                cr = np.abs(Y_[remain_idx]).flatten()
+                cp = "black"
+                mr = ","
+                mp = "x"
+
         elif which == "std_mnist":
             std_mnist = get_std_mnist_mean_mnist()[0]
             like_X = torch.tile(std_mnist.reshape(1,-1), dims=(300,1))
@@ -536,16 +679,20 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
             cmap = cmap_mnist
 
         elif which == "color_previous_level":
-            if level==0: continue
-            cr = np.abs(Y_[remain_idx]-X_remain).flatten()
-            mr = ","
-            cp = "black"
-            mp = "x"
+            if level==0: 
+                xr = X.flatten()
+                yr = Y.flatten()
+                cr = np.ones_like(X).flatten()
+                cp = None
+            else:
+                cr = np.abs(Y_[remain_idx]-X_remain).flatten()
+                mr = ","
+                cp = "black"
+                mp = "x"
         elif which == "only_pruned_previous_y":
             if level==0: continue
             cp = np.abs(Y_[prune_idx]).flatten()
             mp = ","
-            setlim = False
         else:
             print("illegal coloring scheme.")
             return
@@ -558,7 +705,7 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
                 c=cp,
                 cmap=cmap,
                 #alpha=0.5
-                #s=0.7
+                s=0.7
                 )
             ax.set_ylim(Y_prune.min()*1.1, Y_prune.max()*1.1)
             ax.set_xlim(X.min()*1.1, X.max()*1.1)
@@ -571,7 +718,7 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
                 c=cr,
                 cmap=cmap,
                 # alpha=0.5,
-                #s=0.7
+                s=0.7
                 )
             ax.set_ylim(Y_remain.min()*1.1, Y_remain.max()*1.1)
             ax.set_xlim(X_remain.min()*1.1, X_remain.max()*1.1)
@@ -582,6 +729,7 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
         ax.axhline(y_prune_lower_bound, c="red")
         ax.axhline(y_prune_upper_bound, c="red")
         ax.axline((0, 0), (1, 1), linewidth=1, color='r')
+        ax.set_title(std_label(level, e))
         ax.set_xlabel("initial")
         ax.set_ylabel("final")
         ax.grid()
@@ -591,52 +739,8 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(e, cmap="Set3", which
     fig.colorbar(
         im, 
         ax=axs,
+        location="top"
     )
-
-    return fig
-
-def fig_average_statistics(e):
-
-
-    std_mnist = get_std_mnist_mean_mnist()[0]
-    like_X = torch.tile(std_mnist.reshape(1,-1), dims=(300,1)).nan_to_num()
-
-    metrics = dict(
-        survivors_stddev = [],
-        pruners_stddev = [],
-        avg_movement_survivors = [],
-        avg_movement_pruners = [],
-        avg_init_magnitude = [],
-        avg_trained_magnitude = [],
-        avg_init_value = [],
-        avg_trained_value = [],
-    )
-    fig, ax_generator, axs = plotgrid(len(metrics), 2, (4,4))
-    layer = 0
-
-    for level in range(e.num_levels):
-        X = e.weights(level, layer)
-        Y = e.weights(level, layer, ep=e.ep, it=e.it)
-        m = e.mask(level+1, layer)
-
-        # used to index same shape as X
-        _, _, X_remain, X_prune = get_remain_and_prune_idx(X, m)
-        remain_idx, prune_idx, Y_remain, Y_prune = get_remain_and_prune_idx(Y, m)
-
-        metrics["survivors_stddev"] += [torch.mean(like_X[remain_idx])]
-        metrics["pruners_stddev"] += [torch.mean(like_X[prune_idx])]
-        metrics["avg_movement_survivors"] += [torch.mean(torch.abs(X_remain- Y_remain))]
-        metrics["avg_movement_pruners"] += [torch.mean(torch.abs(X_prune- Y_prune))]
-        metrics["avg_init_magnitude"] += [torch.mean(torch.abs(X))]
-        metrics["avg_trained_magnitude"] += [torch.mean(torch.abs(Y))]
-        metrics["avg_init_value"] += [torch.mean((X))]
-        metrics["avg_trained_value"] += [torch.mean(Y)]
-    
-    
-    for ax, (title, x) in zip(ax_generator, metrics.items()):
-        ax.plot(x)
-        ax.set_xlabel("pruning levels")
-        ax.set_title(title)
 
     return fig
 
@@ -659,7 +763,7 @@ def fig_average_statistics_overlap(e):
     fig, ax_generator, axs = plotgrid(len(metrics), 2, (4,4))
     layer = 0
 
-    for level in range(e.num_levels):
+    for level in range(e.num_levels-1):
         X = e.weights(level, layer)
         Y = e.weights(level, layer, ep=e.ep, it=e.it)
         m = e.mask(level+1, layer)
@@ -694,6 +798,48 @@ def fig_average_statistics_overlap(e):
         ax.set_title(title)
         ax.legend()
 
+    return fig
+
+def fig_convex_hull(experiment):
+    fig, ax = plt.subplots(1,1,figsize=(16,9))
+
+    cmap = direct_access_cmap(experiment.num_levels)    # a discrete colormap
+    layer=0
+
+    X = experiment.weights(experiment.num_levels-1, layer)
+    Y = experiment.weights(experiment.num_levels-1, layer, ep=experiment.ep, it=experiment.it)
+    ax.scatter(X,Y)
+
+    for level in range(experiment.num_levels-1):
+        
+        X = experiment.weights(level, layer)
+        Y = experiment.weights(level, layer, ep=experiment.ep, it=experiment.it)
+        m = experiment.mask(level+1, layer)
+
+        x_prune, _ = get_pruned_and_remaining_weights(X, m)
+        y_prune, _ = get_pruned_and_remaining_weights(Y, m)
+
+        points = torch.stack((x_prune, y_prune), dim=1)
+        poly = points_to_convvex_hull_polygon(np.array(points))
+
+        # prune brorders
+        # x_up, x_low = x_prune.min(),x_prune.max()
+        # y_up, y_low = y_prune.min(),y_prune.max()
+        poly.set_edgecolor(cmap(level))
+        poly.set_label(std_label(level, experiment))
+        poly.set_fill("none")
+        poly.set_linewidth(1)
+        poly.set_alpha(1)
+
+        ax.add_patch(
+            poly
+        )
+
+        ax.set_xlabel("initial")
+        ax.set_ylabel("final")
+
+        ax.grid()
+        ax.legend()
     return fig
 
 def fig_scatter_of_survivors_in_before_after_weight_space__example_with_movement_discrete(e):
@@ -795,77 +941,32 @@ def fig_plot_distribution_fan_in_fan_out(e):
     for level in range(1, e.num_levels):
         l0 = e.weights(level, layer=0)
         l1 = e.weights(level, layer=1)
-        
+        fan_in = torch.count_nonzero(l0, dim=1)
         ax[0].hist(
-            torch.count_nonzero(l0, dim=1),
-            density=True,
+            fan_in,
+            bins=np.arange(-0.5, 784.5, 1),
+            density=False,
             color=cmap(level),
             alpha=0.5,
             label=std_label(level, e)
             )
+        ax[0].set_title("Fan in Counts for every Neuron")
 
         ax[1].hist(
             torch.count_nonzero(l1, dim=0),
-            density=True,
+            density=False,
+            bins=np.arange(-0.5, 100.5, 1),
             color=cmap(level),
             #alpha=0.3
             histtype="step",
             label=std_label(level, e)
             )
+        ax[1].set_title("Fan in Counts for every Neuron")
+
     ax[0].legend()
     ax[1].legend()
 
     return fig
-
-def std_label(level, e):
-    return f"lvl:{level} remain:{1-e.get_sparsity(level):.2f} acc:{e.get_metrics(level)[2][-1]:.2f}"
-
-def get_remain_and_prune_idx(x, m)-> tuple:
-    """Returns the newly pruned weights with the new mask."""
-
-
-    remain = (x * m).nonzero(as_tuple=True)
-    prune = (x * ~m).nonzero(as_tuple=True)
-
-    assert x.nonzero(as_tuple=True)[0].numel() == remain[0].numel() + prune[0].numel(), (x.nonzero().numel(),  remain[0].numel(), prune[0].numel())
-    return remain, prune, x[remain], x[prune]
-
-def get_std_mnist_mean_mnist():
-    try:
-        std_mnist = torch.load('std_mnist.pt')
-        mean_mnist = torch.load('mean_mnist.pt')
-
-    except:
-        train_set = torchvision.datasets.MNIST(
-            train=True,
-            root=os.path.join("open_lth_datasets", 'mnist'),
-            download=True,
-            transform=torchvision.transforms.Compose(
-                [
-                    torchvision.transforms.ToTensor(),
-                    torchvision.transforms.Normalize(mean=[0.1307], std=[0.3081])
-                ]
-            )
-        )
-
-        trainloader = torch.utils.data.DataLoader(
-            train_set,
-            batch_size=60000,
-            shuffle=False,
-            num_workers=2
-        )
-
-        # get the first batch, aka all images.
-        mnist = next(iter(trainloader))[0].squeeze()    
-
-        # calculate mean and stddev for each feature. replace 0 with nan.
-        std_mnist, mean_mnist  = torch.std_mean(mnist, axis=0)
-        std_mnist[std_mnist == 0] = torch.nan
-        
-        # save because it is unchanging and takes ~15 seconds to compute.
-        torch.save(std_mnist, 'std_mnist.pt')
-        torch.save(mean_mnist, 'mean_mnist.pt')
-    return std_mnist, mean_mnist
 
 def fig_mnist_mean_stddev_heatmap():
 
