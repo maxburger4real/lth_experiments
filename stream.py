@@ -24,9 +24,6 @@ def get_img(path):
       fig = pickle.load(f)
    return fig
 
-def plot():
-    st.write(st.session_state['Experiment'])
-
 def fetch(selected):
 
    selection = {key: experiments[key] for key in selected}
@@ -39,8 +36,6 @@ def fetch(selected):
       # move the hparams to the side
       container = st.sidebar.container()
       container.markdown(f'## {name.replace("_", " ")}')
-      _expander = container.expander('Script', expanded=False)
-      _expander.text(experiment.get_script())
       _expander = container.expander('Hyperparameters', expanded=False)
       _expander.json(experiment.get_hparams())
 
@@ -88,8 +83,6 @@ else:
       ):
 
       col.header(name)
-      expander = col.expander(f'Script', expanded=False)
-      expander.text(experiment.get_script())
       expander = col.expander(f'Hyperparameters', expanded=False)
       expander.json(experiment.get_hparams())
 

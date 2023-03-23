@@ -241,7 +241,10 @@ class MNIST_LENET_300_100_Experiment:
         path = os.path.join(self.path, f'level_{0}')
         path = os.path.join(path, 'main')
         path = os.path.join(path, f'hparams.log')
-        hparams = {}
+        hparams = {
+            "levels" : self.num_levels,
+        }
+
         with open(path, "r") as f:
             for line in f.readlines():
                 parts = line.split("=>")
@@ -251,9 +254,16 @@ class MNIST_LENET_300_100_Experiment:
                     val = r.strip()
                     hparams[key] = val
 
+
+
+        hparams["metrics"] = [std_label(level, self) for level in range(self.num_levels)],
+
+
         return hparams
 
     def get_script(self):
+        raise NotImplementedError("This function does not work properly yet.")
+
         parent = pathlib.Path(self.path).parent
         scripts = [f for f in os.listdir(parent) if f.endswith('.sh')]
         if len(scripts) != 1:
@@ -472,7 +482,7 @@ def plotgrid(n_plots=1, n_cols=None, individual_plot_size=(6,6)):
 These are functions that receive an Experiment 
 Object as input and output a Figure object.
 """
-def fig_remaining_connections_of_neurons(e: MNIST_LENET_300_100_Experiment, n_cols=3):
+def fig_remaining_connections_of_neurons(e: MNIST_LENET_300_100_Experiment, layer, n_cols=3):
 
     fig, ax_generator, axs = plotgrid(e.num_levels, n_cols, (4,4))
 
@@ -483,7 +493,7 @@ def fig_remaining_connections_of_neurons(e: MNIST_LENET_300_100_Experiment, n_co
     # populate grid with plots
     for level, ax in enumerate(ax_generator):
         find_dead_neurons(
-            e.weights(level, layer=0),
+            e.weights(level, layer),
             ax,
             title=std_label(level, e),
             cmap=cmap
@@ -605,6 +615,7 @@ def fig_morph_distributions_shell_vs_core_over_levels(e, pad=1, sharey=False, de
 
 def fig_scatter_of_survivors_in_before_after_weight_space_(
         e, 
+        layer,
         cmap="Set3",
         which=None, 
         show_pruned=True, 
@@ -614,7 +625,6 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(
         ):
 
     fig, ax_generator, axs = plotgrid(e.num_levels, n_cols=n_cols)
-    layer=0
 
     # initial trailing weights
     Y_ = e.weights(0, layer, ep=e.ep, it=e.it)
@@ -661,6 +671,7 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(
                 mp = "x"
 
         elif which == "std_mnist":
+            assert layer==0, "This only works for input layer"
             std_mnist = get_std_mnist_mean_mnist()[0]
             like_X = torch.tile(std_mnist.reshape(1,-1), dims=(300,1))
             
@@ -726,9 +737,9 @@ def fig_scatter_of_survivors_in_before_after_weight_space_(
 
         # prune brorders
         y_prune_lower_bound, y_prune_upper_bound = Y_prune.min(),Y_prune.max()
-        ax.axhline(y_prune_lower_bound, c="red")
-        ax.axhline(y_prune_upper_bound, c="red")
-        ax.axline((0, 0), (1, 1), linewidth=1, color='r')
+        ax.axhline(y_prune_lower_bound, c="black", linestyle="-")
+        ax.axhline(y_prune_upper_bound, c="black", linestyle="-")
+        ax.axline((0, 0), (1, 1), linewidth=1, color='black', linestyle="-")
         ax.set_title(std_label(level, e))
         ax.set_xlabel("initial")
         ax.set_ylabel("final")
@@ -800,11 +811,10 @@ def fig_average_statistics_overlap(e):
 
     return fig
 
-def fig_convex_hull(experiment):
+def fig_convex_hull(experiment, layer):
     fig, ax = plt.subplots(1,1,figsize=(16,9))
 
     cmap = direct_access_cmap(experiment.num_levels)    # a discrete colormap
-    layer=0
 
     X = experiment.weights(experiment.num_levels-1, layer)
     Y = experiment.weights(experiment.num_levels-1, layer, ep=experiment.ep, it=experiment.it)
