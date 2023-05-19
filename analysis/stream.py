@@ -4,9 +4,9 @@ streamlit run stream.py
 import streamlit as st
 import pathlib
 import os
-import analysis.figures as mf
 import pickle
 
+from experiment_wrapper import MNIST_LENET_300_100_Experiment
 
 # Globals
 datapath = pathlib.Path('../open_lth_data')
@@ -50,7 +50,7 @@ names = [ex.name.replace("experiment_", "") for ex in paths]
 
 # create the experiment objects used to obtain figures.
 experiments = {
-    name : mf.MNIST_LENET_300_100_Experiment(os.path.join(path, "replicate_1"))
+    name : MNIST_LENET_300_100_Experiment(os.path.join(path, "replicate_1"))
     for name, path in zip(names, paths)
 }
 
