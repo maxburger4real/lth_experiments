@@ -1,31 +1,26 @@
-
-#importing required libraries
-
+"""This script runs the streamlit webapp. It can be executed from the command line with:
+streamlit run stream.py
+"""
 import streamlit as st
-import matplotlib
 import pathlib
 import os
-import my_figures as mf
+import analysis.figures as mf
 import pickle
 
 
-st.set_page_config(layout="wide")
-st.title('Lottery Ticket Inspector')
+# Globals
+datapath = pathlib.Path('../open_lth_data')
 
-#@st.cache(hash_funcs={matplotlib.figure.Figure: lambda _: None})
-@st.cache_data()
-def get_fig(path):
-   st.image(path)
-   return fig
 
 @st.cache_data()
 def get_img(path):
+   """Function that uses caching for faster reloading"""
    with open(path, "rb") as f:
       fig = pickle.load(f)
    return fig
 
 def fetch(selected):
-
+   """Function that populates the columns of the dashboard after a change."""
    selection = {key: experiments[key] for key in selected}
 
    for col, (name, experiment) in zip(
@@ -41,20 +36,16 @@ def fetch(selected):
 
       col.header(name)
       for name, path in experiment.png_generator():
-      #for name, path in experiment.unpickle_generator():
-         
-         #fig = get_fig(path)
-         #fig.suptitle("")
-         # fig.set_size_inches(16, 9)
          expander = col.expander(name.replace("_", " "))
-         #expander.pyplot(fig)
          expander.image(path.as_posix(), output_format="png")
 
 
+st.set_page_config(layout="wide")
+st.title('Lottery Ticket Inspector')
+
 
 # find all available experiments, distplay in multiselect
-p = pathlib.Path('./open_lth_data')
-paths = [f for f in p.iterdir() if f.is_dir() if f.name.startswith("experiment")]
+paths = [f for f in datapath.iterdir() if f.is_dir() if f.name.startswith("experiment")]
 names = [ex.name.replace("experiment_", "") for ex in paths]
 
 # create the experiment objects used to obtain figures.
@@ -85,10 +76,3 @@ else:
       col.header(name)
       expander = col.expander(f'Hyperparameters', expanded=False)
       expander.json(experiment.get_hparams())
-
-      
-# #plotting the figure
-# st.pyplot(fig, )
-
-# fig_html = mpld3.fig_to_html(fig)
-# comp.html(fig_html, height=600)

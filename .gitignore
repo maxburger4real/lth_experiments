@@ -1,9 +1,10 @@
 open_lth_data/
+open_lth/
 settings.json
 __pycache__/
 .ipynb_checkpoints/
 .vscode/
 open_lth_datasets/
 .DS_Store
-open_lth_datasets/
-.strealit/
+.streamlit/
+report_images/
