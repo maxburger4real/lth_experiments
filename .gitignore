@@ -5,3 +5,5 @@ __pycache__/
 .vscode/
 open_lth_datasets/
 .DS_Store
+open_lth_datasets/
+.strealit/
